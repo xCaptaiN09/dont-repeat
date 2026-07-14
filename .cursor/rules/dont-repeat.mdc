@@ -1,0 +1,13 @@
+---
+description: Project memory from dont-repeat — failures, decisions, commands
+globs:
+alwaysApply: true
+---
+
+# dont-repeat project memory
+
+Read and respect `.agent-memory/MEMORY.md` before non-trivial work.
+
+- Do not re-attempt **failure** / **do_not** items.
+- Prefer listed **command** recipes.
+- Honor **decision** entries unless the user overrides.

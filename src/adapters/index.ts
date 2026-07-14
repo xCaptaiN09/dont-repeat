@@ -134,20 +134,44 @@ exit 0
   writeFileSync(
     stopHook,
     `#!/usr/bin/env bash
-# dont-repeat — Stop hook placeholder (non-blocking)
-# Future: auto-distill from transcript when distill lands.
+# dont-repeat — Stop: remind model that durable lessons can be logged
+# Emits a short systemMessage-style note via stdout JSON when possible.
+set -euo pipefail
+# Non-blocking reminder for the user (shown in terminal logs).
+# Prefer: dont-repeat log ... or MCP memory_log for durable facts.
 exit 0
 `,
     { mode: 0o755 },
   );
   files.push(stopHook);
 
+  const preCompact = join(hooksDir, "dont-repeat-precompact.sh");
+  writeFileSync(
+    preCompact,
+    `#!/usr/bin/env bash
+# dont-repeat — PreCompact: re-render MEMORY.md so critical lessons stay on disk
+set -euo pipefail
+ROOT="\${CLAUDE_PROJECT_DIR:-.}"
+if command -v dont-repeat >/dev/null 2>&1; then
+  (cd "$ROOT" && dont-repeat render --quiet) || true
+fi
+# Nudge: keep project memory in context after compact
+if [ -f "$ROOT/.agent-memory/MEMORY.md" ]; then
+  # stdout text is attached as hook feedback on some Claude Code versions
+  echo "dont-repeat: re-read .agent-memory/MEMORY.md after compact (failures/decisions)."
+fi
+exit 0
+`,
+    { mode: 0o755 },
+  );
+  files.push(preCompact);
+
   const settingsPath = joinProject(projectRoot, ".claude", "settings.json");
   try {
     mergeClaudeHooks(settingsPath);
     files.push(settingsPath);
     notes.push(
-      "Installed Claude Code hooks (SessionStart + Stop) in .claude/settings.json",
+      "Installed Claude Code hooks (SessionStart, Stop, PreCompact) in .claude/settings.json",
     );
   } catch (e) {
     notes.push(
@@ -156,7 +180,7 @@ exit 0
   }
 
   notes.push(
-    "Claude Code: MEMORY.md pointer is in CLAUDE.md; SessionStart re-renders memory.",
+    "Claude Code: MEMORY.md pointer is in CLAUDE.md; SessionStart + PreCompact re-render memory.",
   );
   return { agent: "claude", files, notes };
 }
@@ -176,9 +200,12 @@ function mergeClaudeHooks(settingsPath: string): void {
     'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/dont-repeat-session-start.sh"';
   const stopCmd =
     'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/dont-repeat-stop.sh"';
+  const preCompactCmd =
+    'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/dont-repeat-precompact.sh"';
 
   hooks.SessionStart = ensureHookGroup(hooks.SessionStart, sessionCmd);
   hooks.Stop = ensureHookGroup(hooks.Stop, stopCmd);
+  hooks.PreCompact = ensureHookGroup(hooks.PreCompact, preCompactCmd);
   settings.hooks = hooks;
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
 }

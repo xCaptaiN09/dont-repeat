@@ -2,7 +2,8 @@
 import { Command } from "commander";
 import pc from "picocolors";
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname as dirnamePath, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { installAdapters, parseAgents } from "../adapters/index.js";
 import { findProjectRoot, isInitialized, memoryPath, storeDir } from "../core/paths.js";
 import {
@@ -18,8 +19,22 @@ import { estimateTokens } from "../core/tokens.js";
 import type { MemoryType } from "../core/types.js";
 import { DEFAULT_TOKEN_BUDGET, MEMORY_TYPES } from "../core/types.js";
 import { rankEntries } from "../core/ranker.js";
+import { distillText, extractTextFromTranscript } from "../core/distill.js";
+import { runDoctor } from "../core/doctor.js";
+import { startMcpServer } from "../mcp/server.js";
 
-const VERSION = "0.1.0";
+function packageVersion(): string {
+  try {
+    const here = dirnamePath(fileURLToPath(import.meta.url));
+    const pkgPath = join(here, "..", "..", "package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+    return pkg.version ?? "0.2.0";
+  } catch {
+    return "0.2.0";
+  }
+}
+
+const VERSION = packageVersion();
 
 function rootOpt(cwd?: string): string {
   return findProjectRoot(cwd ?? process.cwd());
@@ -297,6 +312,106 @@ program
     console.log(`root\t${projectRoot}`);
     console.log(`store\t${storeDir(projectRoot)}`);
     console.log(`memory\t${memoryPath(projectRoot)}`);
+  });
+
+program
+  .command("distill")
+  .description(
+    "Extract candidate memories from notes or a session transcript (rule-based, no API key)",
+  )
+  .argument("[file]", "Path to notes/transcript (default: stdin)")
+  .option("--apply", "Write candidates into the store (default: preview only)")
+  .option("-n, --max <count>", "Max entries to keep", "20")
+  .action(async (file: string | undefined, opts: { apply?: boolean; max: string }) => {
+    const projectRoot = rootOpt();
+    if (!isInitialized(projectRoot)) {
+      fail(`not initialized in ${projectRoot}. Run: dont-repeat init`);
+    }
+    let raw = "";
+    if (file) {
+      if (!existsSync(file)) fail(`file not found: ${file}`);
+      raw = readFileSync(file, "utf8");
+    } else if (!process.stdin.isTTY) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+      raw = Buffer.concat(chunks).toString("utf8");
+    } else {
+      fail("pass a file path or pipe text on stdin");
+    }
+
+    const max = Number(opts.max) || 20;
+    const result = distillText(raw, file ?? "stdin");
+    const candidates = result.candidates.slice(0, max);
+
+    if (!candidates.length) {
+      info("No candidate memories found. Try tagged lines like:");
+      info('  FAILURE: do not use jest for e2e');
+      info('  DECISION: auth lives in session.ts');
+      return;
+    }
+
+    console.log(pc.bold(`Found ${candidates.length} candidate(s)`));
+    console.log(pc.dim(`  source text ~${extractTextFromTranscript(raw).length} chars`));
+    for (const c of candidates) {
+      console.log(`  ${pc.cyan(c.type.padEnd(8))} ${c.summary}`);
+    }
+
+    if (!opts.apply) {
+      console.log();
+      info("Preview only. Re-run with --apply to save.");
+      return;
+    }
+
+    const store = loadStore(projectRoot);
+    const existing = new Set(
+      listEntries(store).map((e) => `${e.type}:${e.summary.toLowerCase()}`),
+    );
+    let added = 0;
+    for (const c of candidates) {
+      const key = `${c.type}:${c.summary.toLowerCase()}`;
+      if (existing.has(key)) continue;
+      addEntry(store, c);
+      existing.add(key);
+      added++;
+    }
+    persist(projectRoot, store);
+    ok(`Applied ${added} new memor${added === 1 ? "y" : "ies"} (${candidates.length - added} skipped as duplicates)`);
+  });
+
+program
+  .command("doctor")
+  .description("Check project memory health and agent wiring")
+  .action(() => {
+    const projectRoot = rootOpt();
+    if (!isInitialized(projectRoot)) {
+      fail(`not initialized in ${projectRoot}. Run: dont-repeat init`);
+    }
+    const store = loadStore(projectRoot);
+    const findings = runDoctor(projectRoot, store);
+    console.log(pc.bold("dont-repeat doctor"));
+    let warns = 0;
+    let errors = 0;
+    for (const f of findings) {
+      if (f.level === "ok") console.log(pc.green("  ✓"), f.message);
+      else if (f.level === "warn") {
+        warns++;
+        console.log(pc.yellow("  !"), f.message);
+      } else {
+        errors++;
+        console.log(pc.red("  ✗"), f.message);
+      }
+    }
+    console.log();
+    if (errors) fail(`${errors} error(s), ${warns} warning(s)`);
+    if (warns) info(`${warns} warning(s) — still usable`);
+    else ok("All checks passed");
+  });
+
+program
+  .command("mcp")
+  .description("Run MCP stdio server (for Claude Code / Cursor MCP config)")
+  .action(() => {
+    startMcpServer();
   });
 
 function splitList(raw?: string): string[] {

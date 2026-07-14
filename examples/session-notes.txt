@@ -1,0 +1,9 @@
+Session notes — auth refactor
+
+FAILURE: do not use jest for e2e — use playwright
+DECISION: auth lives in src/lib/session.ts not middleware
+Gotcha: refresh tokens expire after 7 days in staging
+Use pnpm instead of npm for this monorepo
+$ pnpm test:unit
+never commit .env.local
+We decided to keep sessions in redis, not memory.
