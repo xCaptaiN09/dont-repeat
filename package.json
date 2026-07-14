@@ -1,0 +1,57 @@
+{
+  "name": "dont-repeat",
+  "version": "0.1.0",
+  "description": "Persistent failure & decision memory for AI coding agents — stop re-solving yesterday's problems",
+  "type": "module",
+  "bin": {
+    "dont-repeat": "./dist/cli/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli/index.ts",
+    "start": "node dist/cli/index.js",
+    "test": "tsx --test test/**/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "claude-code",
+    "codex",
+    "gemini-cli",
+    "opencode",
+    "memory",
+    "tokens",
+    "cli",
+    "dont-repeat"
+  ],
+  "author": "Muhammed Dilshad A (https://github.com/xCaptaiN09)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xCaptaiN09/dont-repeat.git"
+  },
+  "homepage": "https://github.com/xCaptaiN09/dont-repeat#readme",
+  "bugs": {
+    "url": "https://github.com/xCaptaiN09/dont-repeat/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
