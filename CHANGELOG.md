@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 — 2026-07-16
+
+### Improved
+- Richer `dont-repeat --help` with quick-start examples
+- New `dont-repeat guide` beginner walkthrough
+- Per-command examples (`help log`, `help distill`, …)
+- Polished README: install, setup, usage, FAQ, TOC
+
 ## 0.2.0 — 2026-07-14
 
 ### Added

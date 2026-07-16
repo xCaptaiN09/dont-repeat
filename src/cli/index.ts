@@ -55,27 +55,81 @@ function info(msg: string): void {
 
 const program = new Command();
 
+const HELP_EXAMPLES = `
+${pc.bold("Quick start")}
+  $ npm install -g dont-repeat
+  $ cd my-project
+  $ dont-repeat init
+  $ dont-repeat log failure "do not use jest for e2e — use playwright"
+  $ dont-repeat status
+
+${pc.bold("Everyday commands")}
+  $ dont-repeat log decision "auth lives in src/lib/session.ts"
+  $ dont-repeat log command "pnpm test needs redis" -t tests
+  $ dont-repeat list
+  $ dont-repeat search auth
+  $ dont-repeat doctor
+
+${pc.bold("From session notes")}
+  $ dont-repeat distill notes.txt          # preview
+  $ dont-repeat distill notes.txt --apply  # save
+
+${pc.bold("Get unstuck")}
+  $ dont-repeat guide                      # full beginner guide
+  $ dont-repeat help log                   # help for one command
+  $ dont-repeat --help                     # this screen
+
+${pc.bold("Memory types for log")}
+  failure | do_not | decision | gotcha | command | fact
+
+${pc.dim("Docs: https://github.com/xCaptaiN09/dont-repeat")}
+`;
+
 program
   .name("dont-repeat")
   .description(
-    "Persistent failure & decision memory for AI coding agents.\nStop paying them to make the same mistake twice.",
+    [
+      "Local failure & decision memory for AI coding agents.",
+      "Stop paying them to make the same mistake twice.",
+      "",
+      "Works with Claude Code, Codex, Gemini CLI, OpenCode, Cursor, and more.",
+      "Run `dont-repeat guide` for a full setup walkthrough.",
+    ].join("\n"),
   )
-  .version(VERSION);
+  .version(VERSION, "-V, --version", "Show version number")
+  .helpOption("-h, --help", "Show help and examples")
+  .addHelpText("after", HELP_EXAMPLES);
+
+program
+  .command("guide")
+  .description("Print a beginner-friendly setup & usage guide")
+  .action(() => {
+    printGuide();
+  });
 
 program
   .command("init")
-  .description("Initialize dont-repeat in this project")
+  .description("Set up dont-repeat in the current project (run this first)")
   .option(
     "-a, --agents <list>",
-    "Comma list: claude,codex,gemini,opencode,cursor,generic,all",
+    "Which tools to wire: claude,codex,gemini,opencode,cursor,generic,all",
     "all",
   )
   .option(
     "-b, --budget <tokens>",
-    "Token budget for MEMORY.md",
+    "Max size of MEMORY.md in tokens (default 600)",
     String(DEFAULT_TOKEN_BUDGET),
   )
-  .option("--force", "Re-run adapters even if already initialized")
+  .option("--force", "Re-wire agent files even if already initialized")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ dont-repeat init
+  $ dont-repeat init --agents claude,codex
+  $ dont-repeat init --budget 800
+`,
+  )
   .action((opts: { agents: string; budget: string; force?: boolean }) => {
     const projectRoot = rootOpt();
     let agents;
@@ -129,15 +183,23 @@ program
 
 program
   .command("log")
-  .description("Add a memory entry")
-  .argument(
-    "<type>",
-    `One of: ${MEMORY_TYPES.join(" | ")}`,
-  )
-  .argument("<summary>", "Short one-line memory")
+  .description("Save a lesson (failure, decision, command, …)")
+  .argument("<type>", `Type: ${MEMORY_TYPES.join(" | ")}`)
+  .argument("<summary>", "Short one-line memory (keep it under ~100 chars)")
   .option("-d, --detail <text>", "Optional extra detail")
-  .option("-t, --tags <list>", "Comma-separated tags")
-  .option("-p, --paths <list>", "Comma-separated related file paths")
+  .option("-t, --tags <list>", "Comma-separated tags, e.g. tests,auth")
+  .option("-p, --paths <list>", "Related file paths, comma-separated")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ dont-repeat log failure "do not use jest for e2e — use playwright"
+  $ dont-repeat log decision "auth lives in src/lib/session.ts" -p src/lib/session.ts
+  $ dont-repeat log command "pnpm test:e2e needs redis" -t tests
+  $ dont-repeat log do_not "do not commit .env"
+  $ dont-repeat log gotcha "CI is Node 20 only"
+`,
+  )
   .action(
     (
       type: string,
@@ -165,10 +227,19 @@ program
 
 program
   .command("list")
-  .description("List memory entries")
-  .option("--type <type>", "Filter by type")
+  .description("Show saved memories")
+  .option("--type <type>", `Filter by type (${MEMORY_TYPES.join(", ")})`)
   .option("--tag <tag>", "Filter by tag")
-  .option("-a, --all", "Include expired/superseded")
+  .option("-a, --all", "Include forgotten/expired entries")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ dont-repeat list
+  $ dont-repeat list --type failure
+  $ dont-repeat list --tag tests
+`,
+  )
   .action((opts: { type?: string; tag?: string; all?: boolean }) => {
     const projectRoot = rootOpt();
     const store = loadStore(projectRoot);
@@ -195,9 +266,17 @@ program
 
 program
   .command("search")
-  .description("Search memories by text")
+  .description("Find memories containing a word or phrase")
   .argument("<query>", "Search query")
-  .option("-a, --all", "Include inactive")
+  .option("-a, --all", "Include forgotten/expired entries")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ dont-repeat search auth
+  $ dont-repeat search playwright
+`,
+  )
   .action((query: string, opts: { all?: boolean }) => {
     const projectRoot = rootOpt();
     const store = loadStore(projectRoot);
@@ -219,8 +298,16 @@ program
 
 program
   .command("forget")
-  .description("Expire a memory by id (prefix ok)")
-  .argument("<id>", "Full id or unique prefix")
+  .description("Remove a memory (soft-delete by id; prefix is ok)")
+  .argument("<id>", "Full id or unique prefix from list/search")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ dont-repeat list
+  $ dont-repeat forget mrksod44
+`,
+  )
   .action((id: string) => {
     const projectRoot = rootOpt();
     const store = loadStore(projectRoot);
@@ -241,8 +328,8 @@ program
 
 program
   .command("render")
-  .description("Rebuild .agent-memory/MEMORY.md from the store")
-  .option("-q, --quiet", "Silent success")
+  .description("Rebuild MEMORY.md (what agents actually read)")
+  .option("-q, --quiet", "No success message (used by hooks)")
   .action((opts: { quiet?: boolean }) => {
     const projectRoot = rootOpt();
     const store = loadStore(projectRoot);
@@ -255,7 +342,7 @@ program
 
 program
   .command("status")
-  .description("Show store health and token usage")
+  .description("Show how many memories you have and token usage")
   .action(() => {
     const projectRoot = rootOpt();
     if (!isInitialized(projectRoot)) {
@@ -291,8 +378,16 @@ program
 
 program
   .command("budget")
-  .description("Set MEMORY.md token budget")
-  .argument("<tokens>", "Token budget (e.g. 600)")
+  .description("Set how large MEMORY.md can be (in tokens)")
+  .argument("<tokens>", "Token budget, e.g. 600")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ dont-repeat budget 600
+  $ dont-repeat budget 1000
+`,
+  )
   .action((tokens: string) => {
     const n = Number(tokens);
     if (!Number.isFinite(n) || n < 100) fail("tokens must be >= 100");
@@ -306,7 +401,7 @@ program
 
 program
   .command("path")
-  .description("Print important paths")
+  .description("Print project root, store, and MEMORY.md paths")
   .action(() => {
     const projectRoot = rootOpt();
     console.log(`root\t${projectRoot}`);
@@ -317,11 +412,26 @@ program
 program
   .command("distill")
   .description(
-    "Extract candidate memories from notes or a session transcript (rule-based, no API key)",
+    "Pull lessons out of notes/transcripts (preview by default; no API key)",
   )
-  .argument("[file]", "Path to notes/transcript (default: stdin)")
-  .option("--apply", "Write candidates into the store (default: preview only)")
-  .option("-n, --max <count>", "Max entries to keep", "20")
+  .argument("[file]", "Notes or transcript file (or pipe text via stdin)")
+  .option("--apply", "Save candidates into the store (default: preview only)")
+  .option("-n, --max <count>", "Max candidates to keep", "20")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ dont-repeat distill notes.txt
+  $ dont-repeat distill notes.txt --apply
+  $ echo "FAILURE: never commit .env" | dont-repeat distill --apply
+
+Tip: tag lines in notes for best results:
+  FAILURE: ...
+  DECISION: ...
+  GOTCHA: ...
+  COMMAND: ...
+`,
+  )
   .action(async (file: string | undefined, opts: { apply?: boolean; max: string }) => {
     const projectRoot = rootOpt();
     if (!isInitialized(projectRoot)) {
@@ -380,7 +490,14 @@ program
 
 program
   .command("doctor")
-  .description("Check project memory health and agent wiring")
+  .description("Check that setup looks healthy (files, budget, hooks)")
+  .addHelpText(
+    "after",
+    `
+Example:
+  $ dont-repeat doctor
+`,
+  )
   .action(() => {
     const projectRoot = rootOpt();
     if (!isInitialized(projectRoot)) {
@@ -409,10 +526,84 @@ program
 
 program
   .command("mcp")
-  .description("Run MCP stdio server (for Claude Code / Cursor MCP config)")
+  .description("Start MCP server so agents can log/search memory as tools")
+  .addHelpText(
+    "after",
+    `
+Example MCP config (Claude Code / Cursor):
+  {
+    "mcpServers": {
+      "dont-repeat": {
+        "command": "dont-repeat",
+        "args": ["mcp"]
+      }
+    }
+  }
+
+Tools exposed: memory_log, memory_search, memory_list, memory_status, memory_render
+`,
+  )
   .action(() => {
     startMcpServer();
   });
+
+function printGuide(): void {
+  const lines = [
+    pc.bold(pc.cyan("dont-repeat — beginner guide")),
+    "",
+    pc.bold("What is this?"),
+    "  AI coding agents forget between sessions. dont-repeat keeps a small",
+    "  local notebook of failures, decisions, and working commands so they",
+    "  stop repeating the same mistakes.",
+    "",
+    pc.bold("1) Install (once)"),
+    "  npm install -g dont-repeat",
+    "  dont-repeat --version",
+    "",
+    pc.bold("2) Setup in a project (once per repo)"),
+    "  cd your-project",
+    "  dont-repeat init",
+    "  # optional: only Claude + Codex",
+    "  # dont-repeat init --agents claude,codex",
+    "",
+    "  This creates:",
+    "    .agent-memory/store.json   — your memory database",
+    "    .agent-memory/MEMORY.md    — short file agents read",
+    "    CLAUDE.md / AGENTS.md / …  — pointers so agents load MEMORY.md",
+    "",
+    pc.bold("3) Log lessons while you work"),
+    '  dont-repeat log failure "do not use X — use Y instead"',
+    '  dont-repeat log decision "we keep auth in session.ts"',
+    '  dont-repeat log command "pnpm test needs redis on 6379"',
+    '  dont-repeat log do_not "do not commit .env"',
+    "",
+    pc.bold("4) Check things look good"),
+    "  dont-repeat status     # counts + token usage",
+    "  dont-repeat doctor     # wiring health check",
+    "  dont-repeat list       # see all memories",
+    "  dont-repeat search auth",
+    "",
+    pc.bold("5) Use your coding agent as usual"),
+    "  Open Claude Code / Codex / Gemini / Cursor in the same project.",
+    "  They should respect MEMORY.md via the instruction files from init.",
+    "",
+    pc.bold("Optional extras"),
+    "  dont-repeat distill notes.txt --apply   # extract lessons from notes",
+    "  dont-repeat mcp                         # MCP tools for agents",
+    "  dont-repeat budget 800                  # allow a larger MEMORY.md",
+    "  dont-repeat forget <id>                 # remove a bad entry",
+    "",
+    pc.bold("Get help anytime"),
+    "  dont-repeat --help",
+    "  dont-repeat help log",
+    "  dont-repeat guide",
+    "",
+    pc.dim("Privacy: everything stays local. .agent-memory/ is gitignored by default."),
+    pc.dim("Docs: https://github.com/xCaptaiN09/dont-repeat"),
+    pc.dim(`Version: ${VERSION}`),
+  ];
+  console.log(lines.join("\n"));
+}
 
 function splitList(raw?: string): string[] {
   if (!raw) return [];
