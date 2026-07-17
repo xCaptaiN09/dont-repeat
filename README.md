@@ -2,7 +2,7 @@
 
 ### Stop AI coding agents from making the same mistake twice.
 
-Local **failure & decision memory** for Claude Code, Codex, Gemini CLI, OpenCode, Cursor, and similar tools.
+Local **failure & decision memory** for Claude Code, Codex, Gemini, OpenCode, Cursor, Antigravity (`agy`), Hermes, Kimi, Qwen, and more — plus **any** CLI via a universal fallback.
 
 No cloud. No account. No API key required.
 
@@ -36,11 +36,12 @@ dont-repeat help log   # help for one command
 5. [Command reference](#command-reference)
 6. [How it works](#how-it-works)
 7. [Supported agents](#supported-agents)
-8. [Distill notes into memory](#distill-notes-into-memory)
-9. [MCP (optional)](#mcp-optional)
-10. [Privacy](#privacy)
-11. [FAQ](#faq)
-12. [Credits](#credits)
+8. [Unsupported CLI? Still works](#unsupported-cli-still-works)
+9. [Distill notes into memory](#distill-notes-into-memory)
+10. [MCP (optional)](#mcp-optional)
+11. [Privacy](#privacy)
+12. [FAQ](#faq)
+13. [Credits](#credits)
 
 ---
 
@@ -171,9 +172,9 @@ dont-repeat status
 
 ### 3. Keep using your coding agent
 
-Open **Claude Code**, **Codex**, **Gemini CLI**, **OpenCode**, or **Cursor** in the same project.
+Open your agent in the same project (Claude Code, Codex, `agy`, Hermes, Cursor, …).
 
-They are pointed at `.agent-memory/MEMORY.md` via the files created by `init`.
+Native tools get instruction-file pointers from `init`. Any other tool can still read `.agent-memory/MEMORY.md` — see [Unsupported CLI?](#unsupported-cli-still-works).
 
 ### 4. Remove a bad entry
 
@@ -223,16 +224,16 @@ failure | do_not | decision | gotcha | command | fact
 ```text
 your-project/
 ├── .agent-memory/
-│   ├── store.json     ← source of truth (structured entries)
-│   └── MEMORY.md      ← compact file agents actually read
-├── CLAUDE.md          ← “please read MEMORY.md” (Claude Code)
-├── AGENTS.md          ← same for Codex / OpenCode / Cursor
-└── GEMINI.md          ← same for Gemini CLI
+│   ├── store.json           ← source of truth
+│   ├── MEMORY.md            ← compact file agents read
+│   └── HOW_TO_CONNECT.md    ← how ANY tool can connect
+├── CLAUDE.md / AGENTS.md / GEMINI.md / HERMES.md / …
+└── (tool-specific rules when applicable)
 ```
 
 1. You **log** (or distill / MCP-add) structured memories  
 2. dont-repeat **ranks** them (failures first) under a token budget  
-3. Agents **load** `MEMORY.md` through their normal instruction files  
+3. Agents **load** `MEMORY.md` via instruction files — or you point them at it  
 
 You do **not** need to paste memory into the chat every time.
 
@@ -240,18 +241,70 @@ You do **not** need to paste memory into the chat every time.
 
 ## Supported agents
 
-| Tool | How it loads memory | Extra automation |
-|------|---------------------|------------------|
-| **Claude Code** | `CLAUDE.md` | SessionStart + PreCompact hooks |
-| **Codex CLI** | `AGENTS.md` | Load on session start |
-| **Gemini CLI** | `GEMINI.md` | Load on session start |
-| **OpenCode** | `AGENTS.md` (+ `opencode.json` if present) | Load |
-| **Cursor** | `AGENTS.md` + `.cursor/rules/dont-repeat.mdc` | Load |
-| **Other tools** | Point them at `.agent-memory/MEMORY.md` | Manual |
+### Native (`dont-repeat init` wires these)
+
+| Agent | Flag | What we write | Support level |
+|-------|------|---------------|---------------|
+| **Claude Code** | `claude` | `CLAUDE.md` + hooks | Full (hooks) |
+| **Codex CLI** | `codex` | `AGENTS.md` | Load |
+| **Gemini CLI** | `gemini` | `GEMINI.md` | Load |
+| **OpenCode** | `opencode` | `AGENTS.md` (+ `opencode.json`) | Load |
+| **Cursor** | `cursor` | `AGENTS.md` + `.cursor/rules` | Load |
+| **Antigravity (`agy`)** | `agy` | `AGENTS.md` + `GEMINI.md` | Load |
+| **Hermes Agent** | `hermes` | `AGENTS.md` + `HERMES.md` | Load |
+| **Kimi CLI** | `kimi` | `AGENTS.md` + `KIMI.md` | Load |
+| **Qwen Code / CLI** | `qwen` | `AGENTS.md` + `QWEN.md` | Load |
+| **OpenClaw** | `openclaw` | `AGENTS.md` + `CLAW.md` | Load / manual if ignored |
+| **ZCode** | `zcode` | `AGENTS.md` | Load / @-attach if needed |
+| **Aider** | `aider` | `CONVENTIONS.md` + `AGENTS.md` | Load (`--read` tip) |
+| **Windsurf** | `windsurf` | `AGENTS.md` + `.windsurfrules` | Load |
+| **GitHub Copilot agent** | `copilot` | `AGENTS.md` | Load / @-mention |
+| **Any other tool** | `generic` | `MEMORY.md` + connect guide | Universal fallback |
 
 ```bash
 dont-repeat init --agents all
-dont-repeat init --agents claude
+dont-repeat init --agents claude,codex,agy,hermes
+dont-repeat init --agents antigravity   # alias for agy
+```
+
+**Aliases:** `antigravity`→`agy`, `claude-code`→`claude`, `hermes-agent`→`hermes`, `kimi-cli`→`kimi`, `qwen-code`→`qwen`, …
+
+**Models vs CLIs:** MiMo / MiniMax / etc. are often **models** used *inside* Claude Code, OpenCode, Cursor, etc. Use the **host** tool’s adapter — memory still works.
+
+---
+
+## Unsupported CLI? Still works
+
+If your tool is **not** in the table, you are **not** stuck.
+
+### Universal path (every tool)
+
+```bash
+cd your-project
+dont-repeat init          # always creates MEMORY.md
+dont-repeat log failure "your lesson here"
+```
+
+Then do **one** of:
+
+| Method | What to do |
+|--------|------------|
+| **One-line rule** | Add to your tool’s rules: `Read .agent-memory/MEMORY.md before non-trivial work.` |
+| **@-mention / attach** | Start session with `@.agent-memory/MEMORY.md` (or open that file) |
+| **MCP** | Run `dont-repeat mcp` and add it to your agent’s MCP config |
+| **Aider tip** | `aider --read .agent-memory/MEMORY.md` |
+
+Full write-up is generated in every project:
+
+```text
+.agent-memory/HOW_TO_CONNECT.md
+```
+
+Logging always works from any terminal (no agent needed):
+
+```bash
+dont-repeat log decision "we chose X"
+dont-repeat status
 ```
 
 ---
@@ -327,6 +380,12 @@ Example config:
 
 **Do I need an API key?**  
 No. Core features (init, log, distill rules, doctor, mcp) run offline.
+
+**Is my CLI supported?**  
+See [Supported agents](#supported-agents). If not listed, use [Unsupported CLI? Still works](#unsupported-cli-still-works) — `MEMORY.md` is universal.
+
+**What about MiMo / MiniMax as models?**  
+They’re models, not harnesses. Run them inside Claude Code / OpenCode / Cursor / etc. Memory follows the **host** tool.
 
 **Will this make my context huge?**  
 No. `MEMORY.md` is capped (default **~600 tokens**). Failures win over low-value facts. Change with `dont-repeat budget 800`.

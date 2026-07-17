@@ -112,7 +112,7 @@ program
   .description("Set up dont-repeat in the current project (run this first)")
   .option(
     "-a, --agents <list>",
-    "Which tools to wire: claude,codex,gemini,opencode,cursor,generic,all",
+    "Tools to wire (comma list or all). See: dont-repeat guide",
     "all",
   )
   .option(
@@ -126,8 +126,15 @@ program
     `
 Examples:
   $ dont-repeat init
-  $ dont-repeat init --agents claude,codex
+  $ dont-repeat init --agents claude,codex,agy,hermes
+  $ dont-repeat init --agents all
   $ dont-repeat init --budget 800
+
+Native agents:
+  claude, codex, gemini, opencode, cursor, agy (antigravity),
+  hermes, kimi, qwen, openclaw, zcode, aider, windsurf, copilot, generic
+
+Unsupported CLI? Still works — read .agent-memory/HOW_TO_CONNECT.md
 `,
   )
   .action((opts: { agents: string; budget: string; force?: boolean }) => {
@@ -563,42 +570,48 @@ function printGuide(): void {
     pc.bold("2) Setup in a project (once per repo)"),
     "  cd your-project",
     "  dont-repeat init",
-    "  # optional: only Claude + Codex",
-    "  # dont-repeat init --agents claude,codex",
+    "  # examples:",
+    "  # dont-repeat init --agents claude,codex,agy,hermes",
+    "  # dont-repeat init --agents all",
     "",
     "  This creates:",
-    "    .agent-memory/store.json   — your memory database",
-    "    .agent-memory/MEMORY.md    — short file agents read",
-    "    CLAUDE.md / AGENTS.md / …  — pointers so agents load MEMORY.md",
+    "    .agent-memory/store.json        — your memory database",
+    "    .agent-memory/MEMORY.md         — short file agents read",
+    "    .agent-memory/HOW_TO_CONNECT.md — how ANY tool can connect",
+    "    CLAUDE.md / AGENTS.md / …      — pointers for native adapters",
     "",
-    pc.bold("3) Log lessons while you work"),
+    pc.bold("3) Supported tools (native init)"),
+    "  claude, codex, gemini, opencode, cursor,",
+    "  agy (antigravity), hermes, kimi, qwen, openclaw, zcode,",
+    "  aider, windsurf, copilot, generic",
+    "",
+    pc.bold("4) Unsupported CLI? Still works"),
+    "  1. Run: dont-repeat init   (creates MEMORY.md)",
+    "  2. Tell your agent once:",
+    '       "Read .agent-memory/MEMORY.md before non-trivial work"',
+    "  3. Or @-attach that file / use MCP: dont-repeat mcp",
+    "  Full steps: .agent-memory/HOW_TO_CONNECT.md",
+    "",
+    pc.bold("5) Log lessons while you work"),
     '  dont-repeat log failure "do not use X — use Y instead"',
     '  dont-repeat log decision "we keep auth in session.ts"',
     '  dont-repeat log command "pnpm test needs redis on 6379"',
     '  dont-repeat log do_not "do not commit .env"',
     "",
-    pc.bold("4) Check things look good"),
+    pc.bold("6) Check things look good"),
     "  dont-repeat status     # counts + token usage",
     "  dont-repeat doctor     # wiring health check",
-    "  dont-repeat list       # see all memories",
-    "  dont-repeat search auth",
-    "",
-    pc.bold("5) Use your coding agent as usual"),
-    "  Open Claude Code / Codex / Gemini / Cursor in the same project.",
-    "  They should respect MEMORY.md via the instruction files from init.",
+    "  dont-repeat list",
     "",
     pc.bold("Optional extras"),
-    "  dont-repeat distill notes.txt --apply   # extract lessons from notes",
-    "  dont-repeat mcp                         # MCP tools for agents",
-    "  dont-repeat budget 800                  # allow a larger MEMORY.md",
-    "  dont-repeat forget <id>                 # remove a bad entry",
+    "  dont-repeat distill notes.txt --apply",
+    "  dont-repeat mcp",
+    "  dont-repeat budget 800",
     "",
     pc.bold("Get help anytime"),
-    "  dont-repeat --help",
-    "  dont-repeat help log",
-    "  dont-repeat guide",
+    "  dont-repeat --help | dont-repeat help log | dont-repeat guide",
     "",
-    pc.dim("Privacy: everything stays local. .agent-memory/ is gitignored by default."),
+    pc.dim("Privacy: local only. .agent-memory/ gitignored by default."),
     pc.dim("Docs: https://github.com/xCaptaiN09/dont-repeat"),
     pc.dim(`Version: ${VERSION}`),
   ];

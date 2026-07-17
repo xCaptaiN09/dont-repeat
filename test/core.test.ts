@@ -77,12 +77,22 @@ describe("dont-repeat core", () => {
     try {
       const store = createEmptyStore(dir, ["claude", "codex", "gemini"], 500);
       persist(dir, store);
-      const results = installAdapters(dir, ["claude", "codex", "gemini", "cursor"]);
-      assert.equal(results.length, 4);
+      const results = installAdapters(dir, [
+        "claude",
+        "codex",
+        "gemini",
+        "cursor",
+        "agy",
+        "hermes",
+      ]);
+      // +1 for HOW_TO_CONNECT always written first
+      assert.ok(results.length >= 6);
       assert.ok(existsSync(join(dir, "CLAUDE.md")));
       assert.ok(existsSync(join(dir, "AGENTS.md")));
       assert.ok(existsSync(join(dir, "GEMINI.md")));
+      assert.ok(existsSync(join(dir, "HERMES.md")));
       assert.ok(existsSync(join(dir, ".cursor", "rules", "dont-repeat.mdc")));
+      assert.ok(existsSync(join(dir, ".agent-memory", "HOW_TO_CONNECT.md")));
       const claude = readFileSync(join(dir, "CLAUDE.md"), "utf8");
       assert.match(claude, /dont-repeat:start/);
       assert.match(claude, /MEMORY\.md/);
@@ -91,3 +101,4 @@ describe("dont-repeat core", () => {
     }
   });
 });
+

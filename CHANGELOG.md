@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 — 2026-07-17
+
+### Added
+- Maximum agent coverage: `agy` (antigravity), `hermes`, `kimi`, `qwen`, `openclaw`, `zcode`, `aider`, `windsurf`, `copilot`
+- Aliases (`antigravity`→`agy`, `claude-code`→`claude`, …)
+- `.agent-memory/HOW_TO_CONNECT.md` on every `init` — how any unsupported CLI can still use memory
+- README sections: full support matrix + “Unsupported CLI? Still works”
+
+### Improved
+- `dont-repeat guide` and `init --help` list all agents + fallback path
+
 ## 0.2.1 — 2026-07-16
 
 ### Improved

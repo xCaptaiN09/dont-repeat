@@ -39,12 +39,22 @@ export interface StoreMeta {
   agents: AgentId[];
 }
 
+/** Official adapter ids accepted by `dont-repeat init --agents`. */
 export type AgentId =
   | "claude"
   | "codex"
   | "gemini"
   | "opencode"
   | "cursor"
+  | "agy"
+  | "hermes"
+  | "kimi"
+  | "qwen"
+  | "openclaw"
+  | "zcode"
+  | "aider"
+  | "windsurf"
+  | "copilot"
   | "generic";
 
 export interface MemoryStore {
@@ -87,5 +97,6 @@ export const DEFAULT_TOKEN_BUDGET = 600;
 export const STORE_DIR = ".agent-memory";
 export const STORE_FILE = "store.json";
 export const MEMORY_FILE = "MEMORY.md";
+export const HOWTO_FILE = "HOW_TO_CONNECT.md";
 export const MANAGED_START = "<!-- dont-repeat:start -->";
 export const MANAGED_END = "<!-- dont-repeat:end -->";

@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { memoryPath } from "../core/paths.js";
+import { memoryPath, storeDir } from "../core/paths.js";
 import type { AgentId } from "../core/types.js";
+import { HOWTO_FILE } from "../core/types.js";
 import { joinProject, upsertManagedSection } from "./managed.js";
 
 export interface AdapterResult {
@@ -10,14 +11,61 @@ export interface AdapterResult {
   notes: string[];
 }
 
+/** All first-class adapters (order is stable for status output). */
 export const ALL_AGENTS: AgentId[] = [
   "claude",
   "codex",
   "gemini",
   "opencode",
   "cursor",
+  "agy",
+  "hermes",
+  "kimi",
+  "qwen",
+  "openclaw",
+  "zcode",
+  "aider",
+  "windsurf",
+  "copilot",
   "generic",
 ];
+
+/** User-friendly aliases → canonical AgentId */
+const ALIASES: Record<string, AgentId> = {
+  claude: "claude",
+  "claude-code": "claude",
+  claudecode: "claude",
+  codex: "codex",
+  "openai-codex": "codex",
+  gemini: "gemini",
+  "gemini-cli": "gemini",
+  opencode: "opencode",
+  "open-code": "opencode",
+  cursor: "cursor",
+  agy: "agy",
+  antigravity: "agy",
+  "antigravity-cli": "agy",
+  hermes: "hermes",
+  "hermes-agent": "hermes",
+  kimi: "kimi",
+  "kimi-cli": "kimi",
+  moonshot: "kimi",
+  qwen: "qwen",
+  "qwen-code": "qwen",
+  "qwen-cli": "qwen",
+  openclaw: "openclaw",
+  claw: "openclaw",
+  zcode: "zcode",
+  "z-code": "zcode",
+  aider: "aider",
+  windsurf: "windsurf",
+  cascade: "windsurf",
+  copilot: "copilot",
+  "github-copilot": "copilot",
+  generic: "generic",
+  any: "generic",
+  other: "generic",
+};
 
 export function parseAgents(raw?: string): AgentId[] {
   if (!raw || raw.trim() === "" || raw.trim() === "all") {
@@ -26,12 +74,14 @@ export function parseAgents(raw?: string): AgentId[] {
   const parts = raw.split(",").map((s) => s.trim().toLowerCase());
   const out: AgentId[] = [];
   for (const p of parts) {
-    if (!ALL_AGENTS.includes(p as AgentId)) {
+    const id = ALIASES[p];
+    if (!id) {
       throw new Error(
-        `Unknown agent "${p}". Valid: ${ALL_AGENTS.join(", ")}, or "all"`,
+        `Unknown agent "${p}". Valid: ${ALL_AGENTS.join(", ")}, or "all". ` +
+          `Aliases: antigravity→agy, claude-code→claude, hermes-agent→hermes, …`,
       );
     }
-    if (!out.includes(p as AgentId)) out.push(p as AgentId);
+    if (!out.includes(id)) out.push(id);
   }
   return out;
 }
@@ -43,16 +93,27 @@ export function installAdapters(
   const mem = memoryPath(projectRoot);
   const results: AdapterResult[] = [];
 
+  // Always drop a connect guide so unsupported tools are never a dead end
+  const howtoPath = writeHowToConnectFile(projectRoot);
+
   for (const agent of agents) {
     switch (agent) {
       case "claude":
         results.push(installClaude(projectRoot, mem));
         break;
       case "codex":
-        results.push(installInstructionFile(projectRoot, mem, "codex", "AGENTS.md"));
+        results.push(
+          installInstructionFile(projectRoot, mem, "codex", "AGENTS.md", [
+            "Codex CLI auto-reads AGENTS.md at project root.",
+          ]),
+        );
         break;
       case "gemini":
-        results.push(installInstructionFile(projectRoot, mem, "gemini", "GEMINI.md"));
+        results.push(
+          installInstructionFile(projectRoot, mem, "gemini", "GEMINI.md", [
+            "Gemini CLI auto-reads GEMINI.md.",
+          ]),
+        );
         break;
       case "opencode":
         results.push(installOpenCode(projectRoot, mem));
@@ -60,19 +121,165 @@ export function installAdapters(
       case "cursor":
         results.push(installCursor(projectRoot, mem));
         break;
+      case "agy":
+        results.push(installAgy(projectRoot, mem));
+        break;
+      case "hermes":
+        results.push(installHermes(projectRoot, mem));
+        break;
+      case "kimi":
+        results.push(installKimi(projectRoot, mem));
+        break;
+      case "qwen":
+        results.push(installQwen(projectRoot, mem));
+        break;
+      case "openclaw":
+        results.push(installOpenClaw(projectRoot, mem));
+        break;
+      case "zcode":
+        results.push(installZCode(projectRoot, mem));
+        break;
+      case "aider":
+        results.push(installAider(projectRoot, mem));
+        break;
+      case "windsurf":
+        results.push(installWindsurf(projectRoot, mem));
+        break;
+      case "copilot":
+        results.push(installCopilot(projectRoot, mem));
+        break;
       case "generic":
         results.push({
           agent: "generic",
-          files: [mem],
+          files: [mem, howtoPath],
           notes: [
-            "Generic mode: agents should read .agent-memory/MEMORY.md",
-            "Point any tool at that file, or add a one-line instruction in your rules.",
+            "Generic fallback enabled for ANY tool.",
+            "Point your agent at: .agent-memory/MEMORY.md",
+            "Or add: Read .agent-memory/MEMORY.md before non-trivial work.",
+            `See: ${HOWTO_FILE}`,
+            "Optional: dont-repeat mcp  (memory_log / memory_search tools)",
           ],
         });
         break;
     }
   }
+
+  // Surface the connect guide once at the end (not as a fake agent)
+  if (!agents.includes("generic")) {
+    results.push({
+      agent: "generic",
+      files: [howtoPath],
+      notes: [
+        `Also wrote .agent-memory/${HOWTO_FILE}`,
+        "Any CLI not listed above can still use MEMORY.md — open that guide.",
+      ],
+    });
+  }
+
   return results;
+}
+
+function writeHowToConnectFile(projectRoot: string): string {
+  mkdirSync(storeDir(projectRoot), { recursive: true });
+  const path = join(storeDir(projectRoot), HOWTO_FILE);
+  writeFileSync(path, howToConnectMarkdown(), "utf8");
+  return path;
+}
+
+function howToConnectMarkdown(): string {
+  return `# How to connect any coding agent to dont-repeat
+
+Even if your CLI is **not** in the native adapter list, you can still use dont-repeat.
+
+## Universal file (works for almost everything)
+
+Read this file at the start of work:
+
+\`\`\`text
+.agent-memory/MEMORY.md
+\`\`\`
+
+That file is the compact, token-budgeted project memory (failures, decisions, commands).
+
+## 3 ways to connect an unsupported CLI
+
+### 1) One-line rule (simplest)
+
+Add this to whatever rules/instructions your tool already has:
+
+\`\`\`text
+Before non-trivial changes, read and respect .agent-memory/MEMORY.md.
+Do not re-attempt items marked failure or do_not.
+\`\`\`
+
+### 2) Paste / @-mention MEMORY.md
+
+At the start of a session:
+
+\`\`\`text
+@/.agent-memory/MEMORY.md  follow these project lessons
+\`\`\`
+
+(or attach / open that file, depending on your tool)
+
+### 3) MCP tools (if your agent supports MCP)
+
+\`\`\`bash
+dont-repeat mcp
+\`\`\`
+
+Config sketch:
+
+\`\`\`json
+{
+  "mcpServers": {
+    "dont-repeat": {
+      "command": "dont-repeat",
+      "args": ["mcp"]
+    }
+  }
+}
+\`\`\`
+
+Tools: \`memory_log\`, \`memory_search\`, \`memory_list\`, \`memory_status\`, \`memory_render\`.
+
+## Native adapters (auto-wired by \`dont-repeat init\`)
+
+| Agent | What we write |
+|-------|----------------|
+| Claude Code | CLAUDE.md + hooks |
+| Codex | AGENTS.md |
+| Gemini CLI | GEMINI.md |
+| OpenCode | AGENTS.md (+ opencode.json if present) |
+| Cursor | AGENTS.md + .cursor/rules |
+| Antigravity (agy) | AGENTS.md + GEMINI.md |
+| Hermes | AGENTS.md + HERMES.md |
+| Kimi CLI | AGENTS.md + KIMI.md |
+| Qwen Code | AGENTS.md + QWEN.md |
+| OpenClaw | AGENTS.md + CLAW.md |
+| ZCode | AGENTS.md |
+| Aider | CONVENTIONS.md |
+| Windsurf | AGENTS.md + .windsurfrules |
+| Copilot | AGENTS.md |
+| generic | MEMORY.md + this guide |
+
+## Log lessons from any tool
+
+You always can (from any terminal):
+
+\`\`\`bash
+dont-repeat log failure "do not use X — use Y"
+dont-repeat log decision "we chose Z"
+dont-repeat status
+\`\`\`
+
+## Help
+
+\`\`\`bash
+dont-repeat guide
+dont-repeat --help
+\`\`\`
+`;
 }
 
 function installInstructionFile(
@@ -80,6 +287,7 @@ function installInstructionFile(
   mem: string,
   agent: AgentId,
   filename: string,
+  extraNotes: string[] = [],
 ): AdapterResult {
   const path = joinProject(projectRoot, filename);
   const r = upsertManagedSection(path, mem, projectRoot);
@@ -92,8 +300,33 @@ function installInstructionFile(
         : r.updated
           ? `Updated managed section in ${filename}`
           : `${filename} already up to date`,
+      ...extraNotes,
     ],
   };
+}
+
+function installMulti(
+  projectRoot: string,
+  mem: string,
+  agent: AgentId,
+  files: string[],
+  notes: string[],
+): AdapterResult {
+  const outFiles: string[] = [];
+  const outNotes = [...notes];
+  for (const filename of files) {
+    const path = joinProject(projectRoot, filename);
+    const r = upsertManagedSection(path, mem, projectRoot);
+    outFiles.push(r.path);
+    outNotes.push(
+      r.created
+        ? `Created ${filename}`
+        : r.updated
+          ? `Updated ${filename}`
+          : `${filename} ok`,
+    );
+  }
+  return { agent, files: outFiles, notes: outNotes };
 }
 
 function installClaude(projectRoot: string, mem: string): AdapterResult {
@@ -134,11 +367,7 @@ exit 0
   writeFileSync(
     stopHook,
     `#!/usr/bin/env bash
-# dont-repeat — Stop: remind model that durable lessons can be logged
-# Emits a short systemMessage-style note via stdout JSON when possible.
-set -euo pipefail
-# Non-blocking reminder for the user (shown in terminal logs).
-# Prefer: dont-repeat log ... or MCP memory_log for durable facts.
+# dont-repeat — Stop hook (non-blocking)
 exit 0
 `,
     { mode: 0o755 },
@@ -149,15 +378,13 @@ exit 0
   writeFileSync(
     preCompact,
     `#!/usr/bin/env bash
-# dont-repeat — PreCompact: re-render MEMORY.md so critical lessons stay on disk
+# dont-repeat — PreCompact: re-render MEMORY.md
 set -euo pipefail
 ROOT="\${CLAUDE_PROJECT_DIR:-.}"
 if command -v dont-repeat >/dev/null 2>&1; then
   (cd "$ROOT" && dont-repeat render --quiet) || true
 fi
-# Nudge: keep project memory in context after compact
 if [ -f "$ROOT/.agent-memory/MEMORY.md" ]; then
-  # stdout text is attached as hook feedback on some Claude Code versions
   echo "dont-repeat: re-read .agent-memory/MEMORY.md after compact (failures/decisions)."
 fi
 exit 0
@@ -171,17 +398,15 @@ exit 0
     mergeClaudeHooks(settingsPath);
     files.push(settingsPath);
     notes.push(
-      "Installed Claude Code hooks (SessionStart, Stop, PreCompact) in .claude/settings.json",
+      "Installed Claude Code hooks (SessionStart, Stop, PreCompact)",
     );
   } catch (e) {
     notes.push(
-      `Could not auto-edit .claude/settings.json (${String(e)}). Hook scripts are under .claude/hooks/`,
+      `Could not auto-edit .claude/settings.json (${String(e)}). Hooks under .claude/hooks/`,
     );
   }
 
-  notes.push(
-    "Claude Code: MEMORY.md pointer is in CLAUDE.md; SessionStart + PreCompact re-render memory.",
-  );
+  notes.push("Claude Code: full native support (CLAUDE.md + hooks).");
   return { agent: "claude", files, notes };
 }
 
@@ -228,9 +453,9 @@ function installOpenCode(projectRoot: string, mem: string): AdapterResult {
   files.push(r.path);
   notes.push(
     r.created
-      ? "Created AGENTS.md for OpenCode/Codex-style agents"
+      ? "Created AGENTS.md for OpenCode"
       : r.updated
-        ? "Updated managed section in AGENTS.md"
+        ? "Updated AGENTS.md"
         : "AGENTS.md already up to date",
   );
 
@@ -246,17 +471,15 @@ function installOpenCode(projectRoot: string, mem: string): AdapterResult {
         json.instructions = [...list, rel];
         writeFileSync(ocPath, JSON.stringify(json, null, 2) + "\n", "utf8");
         files.push(ocPath);
-        notes.push("Added .agent-memory/MEMORY.md to opencode.json instructions");
+        notes.push("Added MEMORY.md to opencode.json instructions");
       } else {
         notes.push("opencode.json already lists MEMORY.md");
       }
     } catch {
-      notes.push("Found opencode.json but could not parse it — left unchanged");
+      notes.push("Found opencode.json but could not parse — left unchanged");
     }
   } else {
-    notes.push(
-      "No opencode.json yet — AGENTS.md pointer is enough for OpenCode",
-    );
+    notes.push("No opencode.json yet — AGENTS.md is enough for OpenCode");
   }
 
   return { agent: "opencode", files, notes };
@@ -292,8 +515,82 @@ Read and respect \`.agent-memory/MEMORY.md\` before non-trivial work.
     "utf8",
   );
   files.push(rulePath);
-  notes.push(
-    "Installed Cursor rule .cursor/rules/dont-repeat.mdc + AGENTS.md pointer",
-  );
+  notes.push("Cursor: .cursor/rules/dont-repeat.mdc + AGENTS.md");
   return { agent: "cursor", files, notes };
+}
+
+function installAgy(projectRoot: string, mem: string): AdapterResult {
+  return installMulti(projectRoot, mem, "agy", ["AGENTS.md", "GEMINI.md"], [
+    "Antigravity CLI (agy) reads AGENTS.md and/or GEMINI.md.",
+    "Alias: --agents antigravity",
+  ]);
+}
+
+function installHermes(projectRoot: string, mem: string): AdapterResult {
+  return installMulti(projectRoot, mem, "hermes", ["AGENTS.md", "HERMES.md"], [
+    "Hermes checks HERMES.md / AGENTS.md / CLAUDE.md (first match wins).",
+    "We write HERMES.md + AGENTS.md so Hermes and other tools both benefit.",
+  ]);
+}
+
+function installKimi(projectRoot: string, mem: string): AdapterResult {
+  return installMulti(projectRoot, mem, "kimi", ["AGENTS.md", "KIMI.md"], [
+    "Kimi CLI: AGENTS.md + KIMI.md pointer. Also try MCP: dont-repeat mcp",
+  ]);
+}
+
+function installQwen(projectRoot: string, mem: string): AdapterResult {
+  return installMulti(projectRoot, mem, "qwen", ["AGENTS.md", "QWEN.md"], [
+    "Qwen Code / Qwen CLI: AGENTS.md + QWEN.md pointer.",
+  ]);
+}
+
+function installOpenClaw(projectRoot: string, mem: string): AdapterResult {
+  return installMulti(projectRoot, mem, "openclaw", ["AGENTS.md", "CLAW.md"], [
+    "OpenClaw: CLAW.md + AGENTS.md pointers.",
+    "If OpenClaw ignores those, use MCP or @-mention MEMORY.md (see HOW_TO_CONNECT.md).",
+  ]);
+}
+
+function installZCode(projectRoot: string, mem: string): AdapterResult {
+  return installMulti(projectRoot, mem, "zcode", ["AGENTS.md"], [
+    "ZCode (desktop): AGENTS.md pointer for tools that honor it.",
+    "If ZCode only uses chat context, @-attach .agent-memory/MEMORY.md each session.",
+  ]);
+}
+
+function installAider(projectRoot: string, mem: string): AdapterResult {
+  const files: string[] = [];
+  const notes: string[] = [];
+  const conventions = joinProject(projectRoot, "CONVENTIONS.md");
+  const r = upsertManagedSection(conventions, mem, projectRoot);
+  files.push(r.path);
+  const agents = joinProject(projectRoot, "AGENTS.md");
+  const r2 = upsertManagedSection(agents, mem, projectRoot);
+  files.push(r2.path);
+  notes.push(
+    "Aider: CONVENTIONS.md + AGENTS.md. Tip: aider --read .agent-memory/MEMORY.md",
+  );
+  return { agent: "aider", files, notes };
+}
+
+function installWindsurf(projectRoot: string, mem: string): AdapterResult {
+  const files: string[] = [];
+  const notes: string[] = [];
+  const agents = joinProject(projectRoot, "AGENTS.md");
+  const r = upsertManagedSection(agents, mem, projectRoot);
+  files.push(r.path);
+
+  const wind = joinProject(projectRoot, ".windsurfrules");
+  const r2 = upsertManagedSection(wind, mem, projectRoot);
+  files.push(r2.path);
+  notes.push("Windsurf: AGENTS.md + .windsurfrules");
+  return { agent: "windsurf", files, notes };
+}
+
+function installCopilot(projectRoot: string, mem: string): AdapterResult {
+  return installMulti(projectRoot, mem, "copilot", ["AGENTS.md"], [
+    "GitHub Copilot coding agent often honors AGENTS.md in-repo.",
+    "For IDE chat, @-mention .agent-memory/MEMORY.md if needed.",
+  ]);
 }
