@@ -90,7 +90,7 @@ program
   .description(
     [
       "Local failure & decision memory for AI coding agents.",
-      "Stop paying them to make the same mistake twice.",
+      "100% automatic self-logging. Agents learn from their own failures!",
       "",
       "Works with Claude Code, Codex, Gemini CLI, OpenCode, Cursor, and more.",
       "Run `dont-repeat guide` for a full setup walkthrough.",
@@ -561,7 +561,7 @@ function printGuide(): void {
     pc.bold("What is this?"),
     "  AI coding agents forget between sessions. dont-repeat keeps a small",
     "  local notebook of failures, decisions, and working commands so they",
-    "  stop repeating the same mistakes.",
+    "  stop repeating the same mistakes. Agents now auto-log failures automatically!",
     "",
     pc.bold("1) Install (once)"),
     "  npm install -g dont-repeat",

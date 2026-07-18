@@ -10,11 +10,11 @@ export function managedBlock(memoryRelPath: string): string {
     "",
     "Before non-trivial changes, read and respect:",
     "",
-    `\`${memoryRelPath}\``,
+    "`${memoryRelPath}`",
     "",
     "- Do **not** re-attempt items marked as **failure** or **do_not**.",
     "- Prefer listed **command** recipes and honor **decision** entries.",
-    "- If you learn a durable failure/decision, tell the user to run `dont-repeat log` (or log it yourself if hooks/MCP allow).",
+    "- **AUTOMATIC SELF-LOGGING (CRITICAL RULE):** If you attempt a fix, run a command, or write code that FAILS or gets rejected, you MUST log it yourself immediately before trying a different approach. Use the memory_log tool if available, or run dont-repeat log failure in the terminal. Do NOT ask the user for permission. You are strictly forbidden from repeating logged failures.",
     "",
     MANAGED_END,
   ].join("\n");
