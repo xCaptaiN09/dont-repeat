@@ -2,7 +2,7 @@
 
 ### Stop AI coding agents from making the same mistake twice.
 
-**New in 0.4.0:** Agents now **automatically log their own failures** without manual intervention. Just set up and forget!
+**New in 0.5.0:** Agents now **automatically log their own failures** without manual intervention. Just set up and forget! MCP is now auto-configured for Claude Code, Cursor, and OpenCode.
 
 Local **failure & decision memory** for Claude Code, Codex, Gemini, OpenCode, Cursor, Antigravity (`agy`), Hermes, Kimi, Qwen, and more — plus **any** CLI via a universal fallback.
 

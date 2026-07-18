@@ -5,6 +5,23 @@ import type { AgentId } from "../core/types.js";
 import { HOWTO_FILE } from "../core/types.js";
 import { joinProject, upsertManagedSection } from "./managed.js";
 
+function writeMcpConfig(projectRoot: string, filePath: string, notes: string[]): void {
+  const absPath = joinProject(projectRoot, filePath);
+  let config: Record<string, unknown> = {};
+  if (existsSync(absPath)) {
+    try {
+      config = JSON.parse(readFileSync(absPath, "utf8")) as Record<string, unknown>;
+    } catch {}
+  }
+  const servers = (config.mcpServers ?? {}) as Record<string, unknown>;
+  servers["dont-repeat"] = { command: "dont-repeat", args: ["mcp"] };
+  config.mcpServers = servers;
+  mkdirSync(dirname(absPath), { recursive: true });
+  writeFileSync(absPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+  notes.push(`Wrote MCP config to ${filePath}`);
+}
+
+
 export interface AdapterResult {
   agent: AgentId;
   files: string[];
@@ -344,6 +361,7 @@ function installClaude(projectRoot: string, mem: string): AdapterResult {
         : "CLAUDE.md already up to date",
   );
 
+  writeMcpConfig(projectRoot, ".mcp.json", notes);
   const hooksDir = joinProject(projectRoot, ".claude", "hooks");
   mkdirSync(hooksDir, { recursive: true });
 
@@ -459,6 +477,7 @@ function installOpenCode(projectRoot: string, mem: string): AdapterResult {
         : "AGENTS.md already up to date",
   );
 
+  writeMcpConfig(projectRoot, "opencode.json", notes);
   const ocPath = joinProject(projectRoot, "opencode.json");
   if (existsSync(ocPath)) {
     try {
@@ -493,6 +512,7 @@ function installCursor(projectRoot: string, mem: string): AdapterResult {
   const r = upsertManagedSection(agents, mem, projectRoot);
   files.push(r.path);
 
+  writeMcpConfig(projectRoot, ".cursor/mcp.json", notes);
   const rulesDir = joinProject(projectRoot, ".cursor", "rules");
   mkdirSync(rulesDir, { recursive: true });
   const rulePath = join(rulesDir, "dont-repeat.mdc");

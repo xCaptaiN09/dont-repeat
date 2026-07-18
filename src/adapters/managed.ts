@@ -10,7 +10,7 @@ export function managedBlock(memoryRelPath: string): string {
     "",
     "Before non-trivial changes, read and respect:",
     "",
-    "`${memoryRelPath}`",
+    `${memoryRelPath}`,
     "",
     "- Do **not** re-attempt items marked as **failure** or **do_not**.",
     "- Prefer listed **command** recipes and honor **decision** entries.",
