@@ -477,7 +477,6 @@ function installOpenCode(projectRoot: string, mem: string): AdapterResult {
         : "AGENTS.md already up to date",
   );
 
-  writeMcpConfig(projectRoot, "opencode.json", notes);
   const ocPath = joinProject(projectRoot, "opencode.json");
   if (existsSync(ocPath)) {
     try {
