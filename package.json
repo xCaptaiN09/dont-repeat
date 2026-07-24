@@ -1,6 +1,6 @@
 {
   "name": "dont-repeat",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Persistent failure & decision memory for AI coding agents — stop re-solving yesterday's problems",
   "type": "module",
   "bin": {

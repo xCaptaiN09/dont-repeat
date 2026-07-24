@@ -8,6 +8,7 @@ import { installAdapters, parseAgents } from "../adapters/index.js";
 import { findProjectRoot, isInitialized, memoryPath, storeDir } from "../core/paths.js";
 import {
   addEntry,
+  addEntryUnlessDuplicate,
   createEmptyStore,
   forgetEntry,
   listEntries,
@@ -16,7 +17,7 @@ import {
   updateMeta,
 } from "../core/store.js";
 import { estimateTokens } from "../core/tokens.js";
-import type { MemoryType } from "../core/types.js";
+import type { MemorySource, MemoryType } from "../core/types.js";
 import { DEFAULT_TOKEN_BUDGET, MEMORY_TYPES } from "../core/types.js";
 import { rankEntries } from "../core/ranker.js";
 import { distillText, extractTextFromTranscript } from "../core/distill.js";
@@ -56,31 +57,21 @@ function info(msg: string): void {
 const program = new Command();
 
 const HELP_EXAMPLES = `
-${pc.bold("Quick start")}
+${pc.bold("Quick start (set and forget)")}
   $ npm install -g dont-repeat
   $ cd my-project
   $ dont-repeat init
-  $ dont-repeat log failure "do not use jest for e2e — use playwright"
+  $ # open Claude Code / Codex / Cursor — agents self-log failures
+
+${pc.bold("Optional (you rarely need these)")}
   $ dont-repeat status
-
-${pc.bold("Everyday commands")}
-  $ dont-repeat log decision "auth lives in src/lib/session.ts"
-  $ dont-repeat log command "pnpm test needs redis" -t tests
   $ dont-repeat list
-  $ dont-repeat search auth
   $ dont-repeat doctor
-
-${pc.bold("From session notes")}
-  $ dont-repeat distill notes.txt          # preview
-  $ dont-repeat distill notes.txt --apply  # save
+  $ dont-repeat log failure "only if you want to add a lesson yourself"
 
 ${pc.bold("Get unstuck")}
-  $ dont-repeat guide                      # full beginner guide
-  $ dont-repeat help log                   # help for one command
-  $ dont-repeat --help                     # this screen
-
-${pc.bold("Memory types for log")}
-  failure | do_not | decision | gotcha | command | fact
+  $ dont-repeat guide
+  $ dont-repeat --help
 
 ${pc.dim("Docs: https://github.com/xCaptaiN09/dont-repeat")}
 `;
@@ -183,52 +174,82 @@ Unsupported CLI? Still works — read .agent-memory/HOW_TO_CONNECT.md
     }
     console.log();
     console.log(pc.bold("Next:"));
-    info('  dont-repeat log failure "do not use X — use Y instead"');
-    info("  dont-repeat log decision \"auth lives in src/lib/session.ts\"");
-    info("  dont-repeat status");
+    info("  Open your coding agent in this project and work normally.");
+    info("  Agents auto-read MEMORY.md and should self-log failures.");
+    info("  Optional check: dont-repeat status   |   dont-repeat doctor");
   });
 
 program
   .command("log")
-  .description("Save a lesson (failure, decision, command, …)")
+  .description(
+    "Save a lesson (optional — agents should self-log; use for manual backup)",
+  )
   .argument("<type>", `Type: ${MEMORY_TYPES.join(" | ")}`)
   .argument("<summary>", "Short one-line memory (keep it under ~100 chars)")
   .option("-d, --detail <text>", "Optional extra detail")
   .option("-t, --tags <list>", "Comma-separated tags, e.g. tests,auth")
   .option("-p, --paths <list>", "Related file paths, comma-separated")
+  .option("-q, --quiet", "Silent (for hooks/agents); skip duplicates")
+  .option(
+    "--source <src>",
+    "Provenance: manual | session | hook | import",
+    "manual",
+  )
   .addHelpText(
     "after",
     `
+Note: After init, agents are instructed to log failures themselves.
+You only need this command for manual overrides or scripts.
+
 Examples:
   $ dont-repeat log failure "do not use jest for e2e — use playwright"
-  $ dont-repeat log decision "auth lives in src/lib/session.ts" -p src/lib/session.ts
-  $ dont-repeat log command "pnpm test:e2e needs redis" -t tests
-  $ dont-repeat log do_not "do not commit .env"
-  $ dont-repeat log gotcha "CI is Node 20 only"
+  $ dont-repeat log decision "auth lives in src/lib/session.ts"
 `,
   )
   .action(
     (
       type: string,
       summary: string,
-      opts: { detail?: string; tags?: string; paths?: string },
+      opts: {
+        detail?: string;
+        tags?: string;
+        paths?: string;
+        quiet?: boolean;
+        source?: string;
+      },
     ) => {
       if (!MEMORY_TYPES.includes(type as MemoryType)) {
         fail(`invalid type "${type}". Use: ${MEMORY_TYPES.join(", ")}`);
       }
       const projectRoot = rootOpt();
       const store = loadStore(projectRoot);
-      const entry = addEntry(store, {
+      const source: MemorySource =
+        opts.source === "session" ||
+        opts.source === "hook" ||
+        opts.source === "import" ||
+        opts.source === "manual"
+          ? opts.source
+          : "manual";
+      const input = {
         type: type as MemoryType,
         summary,
         detail: opts.detail,
         tags: splitList(opts.tags),
         paths: splitList(opts.paths),
-        source: "manual",
-      });
+        source,
+      } as const;
+      const entry = opts.quiet
+        ? addEntryUnlessDuplicate(store, input)
+        : addEntry(store, input);
+      if (!entry) {
+        if (!opts.quiet) info("Skipped (duplicate of an active memory)");
+        process.exit(0);
+      }
       persist(projectRoot, store);
-      ok(`Logged ${pc.bold(entry.type)} ${pc.dim(entry.id)}`);
-      console.log(`  ${entry.summary}`);
+      if (!opts.quiet) {
+        ok(`Logged ${pc.bold(entry.type)} ${pc.dim(entry.id)}`);
+        console.log(`  ${entry.summary}`);
+      }
     },
   );
 
@@ -424,6 +445,7 @@ program
   .argument("[file]", "Notes or transcript file (or pipe text via stdin)")
   .option("--apply", "Save candidates into the store (default: preview only)")
   .option("-n, --max <count>", "Max candidates to keep", "20")
+  .option("-q, --quiet", "Silent mode (hooks)")
   .addHelpText(
     "after",
     `
@@ -431,15 +453,9 @@ Examples:
   $ dont-repeat distill notes.txt
   $ dont-repeat distill notes.txt --apply
   $ echo "FAILURE: never commit .env" | dont-repeat distill --apply
-
-Tip: tag lines in notes for best results:
-  FAILURE: ...
-  DECISION: ...
-  GOTCHA: ...
-  COMMAND: ...
 `,
   )
-  .action(async (file: string | undefined, opts: { apply?: boolean; max: string }) => {
+  .action(async (file: string | undefined, opts: { apply?: boolean; max: string; quiet?: boolean }) => {
     const projectRoot = rootOpt();
     if (!isInitialized(projectRoot)) {
       fail(`not initialized in ${projectRoot}. Run: dont-repeat init`);
@@ -461,38 +477,48 @@ Tip: tag lines in notes for best results:
     const candidates = result.candidates.slice(0, max);
 
     if (!candidates.length) {
-      info("No candidate memories found. Try tagged lines like:");
-      info('  FAILURE: do not use jest for e2e');
-      info('  DECISION: auth lives in session.ts');
+      if (!opts.quiet) {
+        info("No candidate memories found. Try tagged lines like:");
+        info('  FAILURE: do not use jest for e2e');
+      }
       return;
     }
 
-    console.log(pc.bold(`Found ${candidates.length} candidate(s)`));
-    console.log(pc.dim(`  source text ~${extractTextFromTranscript(raw).length} chars`));
-    for (const c of candidates) {
-      console.log(`  ${pc.cyan(c.type.padEnd(8))} ${c.summary}`);
+    if (!opts.quiet) {
+      console.log(pc.bold(`Found ${candidates.length} candidate(s)`));
+      console.log(
+        pc.dim(
+          `  source text ~${extractTextFromTranscript(raw).length} chars`,
+        ),
+      );
+      for (const c of candidates) {
+        console.log(`  ${pc.cyan(c.type.padEnd(8))} ${c.summary}`);
+      }
     }
 
     if (!opts.apply) {
-      console.log();
-      info("Preview only. Re-run with --apply to save.");
+      if (!opts.quiet) {
+        console.log();
+        info("Preview only. Re-run with --apply to save.");
+      }
       return;
     }
 
     const store = loadStore(projectRoot);
-    const existing = new Set(
-      listEntries(store).map((e) => `${e.type}:${e.summary.toLowerCase()}`),
-    );
     let added = 0;
     for (const c of candidates) {
-      const key = `${c.type}:${c.summary.toLowerCase()}`;
-      if (existing.has(key)) continue;
-      addEntry(store, c);
-      existing.add(key);
-      added++;
+      const entry = addEntryUnlessDuplicate(store, {
+        ...c,
+        source: c.source ?? "session",
+      });
+      if (entry) added++;
     }
     persist(projectRoot, store);
-    ok(`Applied ${added} new memor${added === 1 ? "y" : "ies"} (${candidates.length - added} skipped as duplicates)`);
+    if (!opts.quiet) {
+      ok(
+        `Applied ${added} new memor${added === 1 ? "y" : "ies"} (${candidates.length - added} skipped as duplicates)`,
+      );
+    }
   });
 
 program
@@ -558,61 +584,30 @@ function printGuide(): void {
   const lines = [
     pc.bold(pc.cyan("dont-repeat — beginner guide")),
     "",
-    pc.bold("What is this?"),
-    "  AI coding agents forget between sessions. dont-repeat keeps a small",
-    "  local notebook of failures, decisions, and working commands so they",
-    "  stop repeating the same mistakes. Agents now auto-log failures automatically!",
+    pc.bold("Goal: set up once, then forget."),
+    "  Agents read project memory every session and are instructed to",
+    "  log their own failures (MCP or terminal). Claude Code also has",
+    "  hooks that auto-log failed tools. You should not type every mistake.",
     "",
-    pc.bold("1) Install (once)"),
+    pc.bold("1) Install (once on your machine)"),
     "  npm install -g dont-repeat",
-    "  dont-repeat --version",
     "",
-    pc.bold("2) Setup in a project (once per repo)"),
-    "  cd your-project",
-    "  dont-repeat init",
-    "  # examples:",
-    "  # dont-repeat init --agents claude,codex,agy,hermes",
-    "  # dont-repeat init --agents all",
+    pc.bold("2) Init (once per project)"),
+    "  cd your-project && dont-repeat init",
     "",
-    "  This creates:",
-    "    .agent-memory/store.json        — your memory database",
-    "    .agent-memory/MEMORY.md         — short file agents read",
-    "    .agent-memory/HOW_TO_CONNECT.md — how ANY tool can connect",
-    "    CLAUDE.md / AGENTS.md / …      — pointers for native adapters",
+    "  Creates MEMORY.md, agent pointers, MCP (Claude/Cursor), Claude hooks.",
     "",
-    pc.bold("3) Supported tools (native init)"),
-    "  claude, codex, gemini, opencode, cursor,",
-    "  agy (antigravity), hermes, kimi, qwen, openclaw, zcode,",
-    "  aider, windsurf, copilot, generic",
+    pc.bold("3) Work normally"),
+    "  Open any coding agent in this repo. Switch models anytime —",
+    "  memory is shared across Claude, Codex, Cursor, agy, …",
     "",
-    pc.bold("4) Unsupported CLI? Still works"),
-    "  1. Run: dont-repeat init   (creates MEMORY.md)",
-    "  2. Tell your agent once:",
-    '       "Read .agent-memory/MEMORY.md before non-trivial work"',
-    "  3. Or @-attach that file / use MCP: dont-repeat mcp",
-    "  Full steps: .agent-memory/HOW_TO_CONNECT.md",
+    pc.bold("4) Optional checks"),
+    "  dont-repeat status | list | doctor",
     "",
-    pc.bold("5) Log lessons while you work"),
-    '  dont-repeat log failure "do not use X — use Y instead"',
-    '  dont-repeat log decision "we keep auth in session.ts"',
-    '  dont-repeat log command "pnpm test needs redis on 6379"',
-    '  dont-repeat log do_not "do not commit .env"',
+    pc.bold("Manual log? Only if you want a backup lesson."),
+    '  dont-repeat log failure "extra lesson"',
     "",
-    pc.bold("6) Check things look good"),
-    "  dont-repeat status     # counts + token usage",
-    "  dont-repeat doctor     # wiring health check",
-    "  dont-repeat list",
-    "",
-    pc.bold("Optional extras"),
-    "  dont-repeat distill notes.txt --apply",
-    "  dont-repeat mcp",
-    "  dont-repeat budget 800",
-    "",
-    pc.bold("Get help anytime"),
-    "  dont-repeat --help | dont-repeat help log | dont-repeat guide",
-    "",
-    pc.dim("Privacy: local only. .agent-memory/ gitignored by default."),
-    pc.dim("Docs: https://github.com/xCaptaiN09/dont-repeat"),
+    pc.dim("Privacy: 100% local. https://github.com/xCaptaiN09/dont-repeat"),
     pc.dim(`Version: ${VERSION}`),
   ];
   console.log(lines.join("\n"));

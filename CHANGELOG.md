@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0 — 2026-07-18
+
+### Automatic-first
+- Stronger self-log rules in all instruction files (agents own logging)
+- Claude Code: PostToolUseFailure hook auto-logs failed tools
+- Claude Code: Stop hook best-effort distill from last message
+- Claude Code: `.claude/rules/dont-repeat.md` always-on
+- Cursor rule rewritten for automatic self-logging + MCP
+- `log -q` / `distill -q` + duplicate suppression for hooks
+- README + guide: **init once, work normally** (manual log is optional)
+
+## 0.5.1 — 2026-07-18
+
+### Fixed
+- Stop generating opencode.json (OpenCode crash)
+
+## 0.5.0 / 0.4.0 — 2026-07-18
+
+- Auto MCP for Claude/Cursor; automatic self-logging instructions
+
 ## 0.3.0 — 2026-07-17
 
 ### Added

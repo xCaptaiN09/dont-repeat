@@ -90,6 +90,29 @@ export function addEntry(store: MemoryStore, input: LogInput): MemoryEntry {
   return entry;
 }
 
+/**
+ * Add only if no active entry has a very similar summary (avoids hook spam).
+ * Returns null when skipped as duplicate.
+ */
+export function addEntryUnlessDuplicate(
+  store: MemoryStore,
+  input: LogInput,
+): MemoryEntry | null {
+  const summary = input.summary.trim().toLowerCase();
+  if (!summary) throw new Error("summary is required");
+  const needle = summary.slice(0, 60);
+  const dup = store.entries.some(
+    (e) =>
+      e.status === "active" &&
+      e.type === input.type &&
+      (e.summary.toLowerCase() === summary ||
+        e.summary.toLowerCase().includes(needle) ||
+        summary.includes(e.summary.toLowerCase().slice(0, 60))),
+  );
+  if (dup) return null;
+  return addEntry(store, input);
+}
+
 export function forgetEntry(store: MemoryStore, id: string): MemoryEntry | null {
   const entry = store.entries.find((e) => e.id === id || e.id.startsWith(id));
   if (!entry) return null;

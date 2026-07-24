@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   addEntry,
+  addEntryUnlessDuplicate,
   createEmptyStore,
   forgetEntry,
   listEntries,
@@ -67,6 +68,27 @@ describe("dont-repeat core", () => {
       const all = listEntries(loadStore(dir), { includeInactive: true });
       assert.equal(all.length, 1);
       assert.equal(all[0].status, "expired");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips near-duplicate auto logs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dont-repeat-"));
+    try {
+      const store = createEmptyStore(dir);
+      const a = addEntryUnlessDuplicate(store, {
+        type: "failure",
+        summary: "failed Bash: npm test — exit 1",
+        source: "hook",
+      });
+      const b = addEntryUnlessDuplicate(store, {
+        type: "failure",
+        summary: "failed Bash: npm test — exit 1",
+        source: "hook",
+      });
+      assert.ok(a);
+      assert.equal(b, null);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

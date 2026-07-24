@@ -23,7 +23,7 @@ import { memoryPath } from "../core/paths.js";
 
 const SERVER_INFO = {
   name: "dont-repeat",
-  version: "0.2.0",
+  version: "0.6.0",
 };
 
 type Json = Record<string, unknown>;
@@ -62,7 +62,7 @@ const TOOLS = [
   {
     name: "memory_log",
     description:
-      "Log a durable project memory (failure, decision, command, gotcha, do_not, fact). Prefer failure/do_not when something should not be retried.",
+      "REQUIRED after any failed fix/command/test: log a durable lesson so future sessions (any model) do not retry it. Use type=failure for mistakes. Also use for decisions/commands/gotchas. Do not ask the user — call this yourself.",
     inputSchema: {
       type: "object",
       properties: {

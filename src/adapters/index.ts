@@ -3,7 +3,11 @@ import { dirname, join } from "node:path";
 import { memoryPath, storeDir } from "../core/paths.js";
 import type { AgentId } from "../core/types.js";
 import { HOWTO_FILE } from "../core/types.js";
-import { joinProject, upsertManagedSection } from "./managed.js";
+import {
+  alwaysOnRuleBody,
+  joinProject,
+  upsertManagedSection,
+} from "./managed.js";
 
 function writeMcpConfig(projectRoot: string, filePath: string, notes: string[]): void {
   const absPath = joinProject(projectRoot, filePath);
@@ -206,46 +210,35 @@ function writeHowToConnectFile(projectRoot: string): string {
 function howToConnectMarkdown(): string {
   return `# How to connect any coding agent to dont-repeat
 
-Even if your CLI is **not** in the native adapter list, you can still use dont-repeat.
+## Set and forget
 
-## Universal file (works for almost everything)
+After \`dont-repeat init\`, you should **not** need to type every failure.
 
-Read this file at the start of work:
+1. Agents **read** \`.agent-memory/MEMORY.md\` every session  
+2. Agents are **ordered** to self-log failures (MCP \`memory_log\` or \`dont-repeat log\`)  
+3. Claude Code also has **hooks** that auto-log failed tools and distill on stop  
+
+Switch models anytime (Opus → Codex → agy): memory is **per project**, shared by all.
+
+## Universal file
 
 \`\`\`text
 .agent-memory/MEMORY.md
 \`\`\`
 
-That file is the compact, token-budgeted project memory (failures, decisions, commands).
+## If your CLI has no native adapter
 
-## 3 ways to connect an unsupported CLI
-
-### 1) One-line rule (simplest)
-
-Add this to whatever rules/instructions your tool already has:
+### 1) One-line rule
 
 \`\`\`text
-Before non-trivial changes, read and respect .agent-memory/MEMORY.md.
-Do not re-attempt items marked failure or do_not.
+Read .agent-memory/MEMORY.md first. On any failure, run:
+dont-repeat log failure "what failed — do not retry" 
+(or call memory_log MCP). Do not ask the user to log.
 \`\`\`
 
-### 2) Paste / @-mention MEMORY.md
+### 2) @-mention MEMORY.md at session start
 
-At the start of a session:
-
-\`\`\`text
-@/.agent-memory/MEMORY.md  follow these project lessons
-\`\`\`
-
-(or attach / open that file, depending on your tool)
-
-### 3) MCP tools (if your agent supports MCP)
-
-\`\`\`bash
-dont-repeat mcp
-\`\`\`
-
-Config sketch:
+### 3) MCP
 
 \`\`\`json
 {
@@ -258,35 +251,10 @@ Config sketch:
 }
 \`\`\`
 
-Tools: \`memory_log\`, \`memory_search\`, \`memory_list\`, \`memory_status\`, \`memory_render\`.
-
-## Native adapters (auto-wired by \`dont-repeat init\`)
-
-| Agent | What we write |
-|-------|----------------|
-| Claude Code | CLAUDE.md + hooks |
-| Codex | AGENTS.md |
-| Gemini CLI | GEMINI.md |
-| OpenCode | AGENTS.md (+ opencode.json if present) |
-| Cursor | AGENTS.md + .cursor/rules |
-| Antigravity (agy) | AGENTS.md + GEMINI.md |
-| Hermes | AGENTS.md + HERMES.md |
-| Kimi CLI | AGENTS.md + KIMI.md |
-| Qwen Code | AGENTS.md + QWEN.md |
-| OpenClaw | AGENTS.md + CLAW.md |
-| ZCode | AGENTS.md |
-| Aider | CONVENTIONS.md |
-| Windsurf | AGENTS.md + .windsurfrules |
-| Copilot | AGENTS.md |
-| generic | MEMORY.md + this guide |
-
-## Log lessons from any tool
-
-You always can (from any terminal):
+## Manual log (optional backup only)
 
 \`\`\`bash
-dont-repeat log failure "do not use X — use Y"
-dont-repeat log decision "we chose Z"
+dont-repeat log failure "only if the agent forgot"
 dont-repeat status
 \`\`\`
 
@@ -355,11 +323,18 @@ function installClaude(projectRoot: string, mem: string): AdapterResult {
   files.push(r.path);
   notes.push(
     r.created
-      ? "Created CLAUDE.md with dont-repeat pointer"
+      ? "Created CLAUDE.md with auto self-log rules"
       : r.updated
-        ? "Updated managed section in CLAUDE.md"
+        ? "Updated CLAUDE.md managed section"
         : "CLAUDE.md already up to date",
   );
+
+  // Always-on rule file (Claude Code loads .claude/rules/*.md)
+  const rulesDir = joinProject(projectRoot, ".claude", "rules");
+  mkdirSync(rulesDir, { recursive: true });
+  const rulePath = join(rulesDir, "dont-repeat.md");
+  writeFileSync(rulePath, alwaysOnRuleBody(), "utf8");
+  files.push(rulePath);
 
   writeMcpConfig(projectRoot, ".mcp.json", notes);
   const hooksDir = joinProject(projectRoot, ".claude", "hooks");
@@ -369,7 +344,7 @@ function installClaude(projectRoot: string, mem: string): AdapterResult {
   writeFileSync(
     sessionStart,
     `#!/usr/bin/env bash
-# dont-repeat — SessionStart: ensure MEMORY.md is fresh
+# dont-repeat — SessionStart: refresh MEMORY.md
 set -euo pipefail
 ROOT="\${CLAUDE_PROJECT_DIR:-.}"
 if command -v dont-repeat >/dev/null 2>&1; then
@@ -385,25 +360,91 @@ exit 0
   writeFileSync(
     stopHook,
     `#!/usr/bin/env bash
-# dont-repeat — Stop hook (non-blocking)
+# dont-repeat — Stop: distill lessons from last assistant message (best-effort)
+set -euo pipefail
+ROOT="\${CLAUDE_PROJECT_DIR:-.}"
+cd "$ROOT" || exit 0
+command -v dont-repeat >/dev/null 2>&1 || exit 0
+command -v node >/dev/null 2>&1 || exit 0
+node -e '
+let d="";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", c => d += c);
+process.stdin.on("end", () => {
+  try {
+    const j = JSON.parse(d || "{}");
+    const msg = String(j.last_assistant_message || "");
+    if (msg.length < 40) process.exit(0);
+    if (!/fail|error|rejected|cannot |can\\x27t |does not work|broke|exception|E[A-Z]+/i.test(msg)) {
+      process.exit(0);
+    }
+    const { spawnSync } = require("child_process");
+    spawnSync("dont-repeat", ["distill", "--apply", "-q", "-n", "5"], {
+      input: msg,
+      encoding: "utf8",
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+  } catch {}
+});
+'
 exit 0
 `,
     { mode: 0o755 },
   );
   files.push(stopHook);
 
+  const postFail = join(hooksDir, "dont-repeat-post-fail.sh");
+  writeFileSync(
+    postFail,
+    `#!/usr/bin/env bash
+# dont-repeat — PostToolUseFailure: auto-log failed tools (no user action)
+set -euo pipefail
+ROOT="\${CLAUDE_PROJECT_DIR:-.}"
+cd "$ROOT" || exit 0
+command -v dont-repeat >/dev/null 2>&1 || exit 0
+command -v node >/dev/null 2>&1 || exit 0
+node -e '
+let d="";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", c => d += c);
+process.stdin.on("end", () => {
+  try {
+    const j = JSON.parse(d || "{}");
+    const name = String(j.tool_name || "tool");
+    const input = j.tool_input || {};
+    const cmd = String(input.command || input.file_path || input.path || "").slice(0, 90);
+    const err = String(j.error || j.message || j.tool_result || "").slice(0, 80);
+    const summary = ("failed " + name + (cmd ? ": " + cmd : "") + (err ? " — " + err : ""))
+      .replace(/[\\r\\n]+/g, " ")
+      .slice(0, 140);
+    if (summary.length < 12) process.exit(0);
+    const { spawnSync } = require("child_process");
+    spawnSync(
+      "dont-repeat",
+      ["log", "failure", summary, "-q", "--source", "hook", "-t", "auto,hook"],
+      { stdio: "ignore" },
+    );
+  } catch {}
+});
+'
+exit 0
+`,
+    { mode: 0o755 },
+  );
+  files.push(postFail);
+
   const preCompact = join(hooksDir, "dont-repeat-precompact.sh");
   writeFileSync(
     preCompact,
     `#!/usr/bin/env bash
-# dont-repeat — PreCompact: re-render MEMORY.md
+# dont-repeat — PreCompact: re-render MEMORY.md so lessons survive
 set -euo pipefail
 ROOT="\${CLAUDE_PROJECT_DIR:-.}"
 if command -v dont-repeat >/dev/null 2>&1; then
   (cd "$ROOT" && dont-repeat render --quiet) || true
 fi
 if [ -f "$ROOT/.agent-memory/MEMORY.md" ]; then
-  echo "dont-repeat: re-read .agent-memory/MEMORY.md after compact (failures/decisions)."
+  echo "dont-repeat: re-read .agent-memory/MEMORY.md after compact."
 fi
 exit 0
 `,
@@ -416,7 +457,7 @@ exit 0
     mergeClaudeHooks(settingsPath);
     files.push(settingsPath);
     notes.push(
-      "Installed Claude Code hooks (SessionStart, Stop, PreCompact)",
+      "Claude hooks: SessionStart, Stop(distill), PostToolUseFailure(auto-log), PreCompact",
     );
   } catch (e) {
     notes.push(
@@ -424,7 +465,9 @@ exit 0
     );
   }
 
-  notes.push("Claude Code: full native support (CLAUDE.md + hooks).");
+  notes.push(
+    "Claude Code: automatic — MCP + self-log rules + failure hooks. User does not need to log.",
+  );
   return { agent: "claude", files, notes };
 }
 
@@ -445,20 +488,35 @@ function mergeClaudeHooks(settingsPath: string): void {
     'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/dont-repeat-stop.sh"';
   const preCompactCmd =
     'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/dont-repeat-precompact.sh"';
+  const postFailCmd =
+    'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/dont-repeat-post-fail.sh"';
 
   hooks.SessionStart = ensureHookGroup(hooks.SessionStart, sessionCmd);
   hooks.Stop = ensureHookGroup(hooks.Stop, stopCmd);
   hooks.PreCompact = ensureHookGroup(hooks.PreCompact, preCompactCmd);
+  hooks.PostToolUseFailure = ensureHookGroup(
+    hooks.PostToolUseFailure,
+    postFailCmd,
+    "*",
+  );
   settings.hooks = hooks;
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
 }
 
-function ensureHookGroup(existing: unknown, command: string): unknown[] {
+function ensureHookGroup(
+  existing: unknown,
+  command: string,
+  matcher?: string,
+): unknown[] {
   const groups = Array.isArray(existing) ? [...existing] : [];
-  if (JSON.stringify(groups).includes("dont-repeat")) return groups;
-  groups.push({
+  const marker =
+    command.match(/dont-repeat-[a-z0-9-]+\.sh/)?.[0] ?? "dont-repeat";
+  if (JSON.stringify(groups).includes(marker)) return groups;
+  const group: Record<string, unknown> = {
     hooks: [{ type: "command", command }],
-  });
+  };
+  if (matcher) group.matcher = matcher;
+  groups.push(group);
   return groups;
 }
 
@@ -518,23 +576,19 @@ function installCursor(projectRoot: string, mem: string): AdapterResult {
   writeFileSync(
     rulePath,
     `---
-description: Project memory from dont-repeat — failures, decisions, commands
+description: dont-repeat automatic project memory — read MEMORY.md and self-log failures
 globs:
 alwaysApply: true
 ---
 
-# dont-repeat project memory
-
-Read and respect \`.agent-memory/MEMORY.md\` before non-trivial work.
-
-- Do not re-attempt **failure** / **do_not** items.
-- Prefer listed **command** recipes.
-- Honor **decision** entries unless the user overrides.
+${alwaysOnRuleBody()}
 `,
     "utf8",
   );
   files.push(rulePath);
-  notes.push("Cursor: .cursor/rules/dont-repeat.mdc + AGENTS.md");
+  notes.push(
+    "Cursor: MCP + always-on rule with automatic self-logging instructions",
+  );
   return { agent: "cursor", files, notes };
 }
 
